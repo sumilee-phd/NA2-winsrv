@@ -70,7 +70,9 @@
       v: 2,
       server: SERVER,
       net: { adapters: [adapter('로컬 영역 연결')] },
-      sec: { complexity: false, history: 0, maxAge: 42, minLen: 0, minAge: 0, reversible: false,
+      /* Windows Server 2022 기본 보안 템플릿(C:\Windows\inf\defltsv.inf)과 같은 값: PasswordComplexity 1, MinimumPasswordLength 0,
+         PasswordHistorySize 0, MaximumPasswordAge 42, MinimumPasswordAge 0, ClearTextPassword 0, LockoutBadCount 0(기간·원래대로 설정은 구성 안 됨) */
+      sec: { complexity: true, history: 0, maxAge: 42, minLen: 0, minAge: 0, reversible: false,
         lockDuration: null, lockThreshold: 0, lockReset: null },
       dhcp: { scopes: [] },
       dns: { zones: [] },

@@ -108,10 +108,10 @@ M.setIpv4(st, 0, { auto: false, ip: '192.168.50.18', mask: '255.255.255.248', gw
 ok(st.net.adapters[0].v4.dnsAuto === false && st.net.adapters[0].v4.dns1 === '192.168.50.19', '다음 IP 주소 사용이면 DNS도 수동 지정');
 ok(M.setIpv4(st, 0, { auto: false, ip: '192.168.50.300', mask: '255.255.255.0' }).ok === false, '255를 넘는 칸은 저장하지 않음');
 
-// 로컬 보안 정책: WS2022 캡처 02a·02e·02f·02g
+// 로컬 보안 정책: WS2022 캡처 02a·02e·02f·02g, 기본 보안 템플릿 defltsv.inf(2026-11-16 VM 실측)
 st = M.create();
-eq(['history', 'maxAge', 'minLen', 'minAge', 'lockDuration', 'lockThreshold', 'lockReset'].map(k => M.secText(st, k)),
-  ['0 개 암호 기억됨', '42 일', '0 문자', '0 일', '해당 없음', '0 번의 잘못된 로그온 시도', '해당 없음'], '보안 정책 기본값 표시');
+eq(['complexity', 'history', 'maxAge', 'minLen', 'minAge', 'reversible', 'lockDuration', 'lockThreshold', 'lockReset'].map(k => M.secText(st, k)),
+  ['사용', '0 개 암호 기억됨', '42 일', '0 문자', '0 일', '사용 안 함', '해당 없음', '0 번의 잘못된 로그온 시도', '해당 없음'], '보안 정책 기본값 표시(복잡성 사용)');
 let ch = M.secChange(st, 'lockDuration', 20);
 ok(!!ch.error, '임계값 0이면 잠금 기간을 바꿀 수 없음');
 ch = M.secChange(st, 'lockThreshold', 3);
@@ -193,10 +193,14 @@ ok(!M.ftpSetFirewall(st, fr.id, { extIp: '10.0.0.300' }).ok, '방화벽 외부 I
 // 사용자
 ok(/함께 선택할 수 없습니다/.test(M.createUser(st, { name: 'u1', pw: 'x', mustChange: true, cantChange: true }).error), '다음 로그온 변경과 변경 불가 동시 선택 거부');
 ok(/서로 다릅니다/.test(M.createUser(st, { name: 'u1', pw: 'a', pw2: 'b', mustChange: false }).error), '암호 확인 불일치 거부');
+ok(/암호 정책/.test(M.createUser(st, { name: 'u1', pw: 'longenough', mustChange: false }).error), '복잡성 기본값(사용): 소문자만 쓴 암호 거부');
+ok(/암호 정책/.test(M.createUser(st, { name: 'kim01', pw: 'Kim01#abc', mustChange: false }).error), '복잡성: 사용자 이름이 들어간 암호 거부');
 M.secSet(st, 'minLen', 8);
-ok(/암호 정책/.test(M.createUser(st, { name: 'u1', pw: 'short', mustChange: false }).error), '최소 암호 길이 정책 적용');
-ok(M.createUser(st, { name: 'u1', pw: 'longenough', mustChange: false }).ok && M.groupsOf(st, 'u1').includes('Users'), '새 사용자는 Users 그룹에 들어감');
-ok(/이미/.test(M.createUser(st, { name: 'U1', pw: 'longenough', mustChange: false }).error), '사용자 이름 중복(대소문자 무시) 거부');
+ok(/암호 정책/.test(M.createUser(st, { name: 'u1', pw: 'Sh#1rt', mustChange: false }).error), '최소 암호 길이 정책 적용');
+ok(M.createUser(st, { name: 'u1', pw: 'Long#enough1', mustChange: false }).ok && M.groupsOf(st, 'u1').includes('Users'), '새 사용자는 Users 그룹에 들어감');
+ok(/이미/.test(M.createUser(st, { name: 'U1', pw: 'Long#enough1', mustChange: false }).error), '사용자 이름 중복(대소문자 무시) 거부');
+st.sec.complexity = false;
+ok(M.createUser(st, { name: 'u2', pw: 'longenough', mustChange: false }).ok, '복잡성 사용 안 함이면 길이만 검사');
 ok(!M.resolveNames(st, 'Print Operator', 'group').ok && M.resolveNames(st, 'print operators', 'group').names[0] === 'Print Operators', '이름 확인: 정확한 그룹 이름으로 바꿈');
 ok(!M.deleteUser(st, 'Administrator').ok, '기본 제공 계정 삭제 거부');
 // 보안 옵션 연동
