@@ -27,7 +27,7 @@
   };
   const NODES = [{ id: 'root', label: '보안 설정', icon: 'sec', kids: [
     { id: 'acct', label: '계정 정책', icon: 'folder', kids: [{ id: 'pw', label: '암호 정책', icon: 'folder' }, { id: 'lock', label: '계정 잠금 정책', icon: 'folder' }] },
-    { id: 'local', label: '로컬 정책', icon: 'folder', kids: [{ id: 'audit', label: '감사 정책', icon: 'folder', out: true }, { id: 'rights', label: '사용자 권한 할당', icon: 'folder', out: true }, { id: 'opts', label: '보안 옵션', icon: 'folder', out: true }] },
+    { id: 'local', label: '로컬 정책', icon: 'folder', kids: [{ id: 'audit', label: '감사 정책', icon: 'folder', out: true }, { id: 'rights', label: '사용자 권한 할당', icon: 'folder', out: true }, { id: 'opts', label: '보안 옵션', icon: 'folder' }] },
     { id: 'fw', label: '고급 보안이 포함된 Windows Defender 방화벽', icon: 'folder', out: true },
     { id: 'nlm', label: '네트워크 목록 관리자 정책', icon: 'folder', out: true },
     { id: 'pk', label: '공개 키 정책', icon: 'folder', out: true },
@@ -37,6 +37,20 @@
     { id: 'adv', label: '고급 감사 정책 구성', icon: 'folder', out: true },
   ] }];
   const CHILD = { root: ['계정 정책', '로컬 정책'], acct: ['암호 정책', '계정 잠금 정책'], local: ['감사 정책', '사용자 권한 할당', '보안 옵션'] };
+  const OPT_EXPLAIN = {
+    adminName: '기본 제공 Administrator 계정의 이름을 바꿉니다. 잘 알려진 이름을 바꾸면 계정 이름을 추측하기 어려워집니다.',
+    guestName: '기본 제공 Guest 계정의 이름을 바꿉니다.',
+    guestOn: 'Guest 계정을 사용할지 정합니다. 기본값은 「사용 안 함」입니다.',
+    blankConsole: '「사용」이면 빈 암호 계정은 콘솔에서만 로그온할 수 있고 네트워크로는 로그온할 수 없습니다.',
+    noCAD: '「사용」이면 로그온할 때 Ctrl+Alt+Del을 누르지 않아도 됩니다.',
+    msgTitle: '로그온하기 전에 사용자에게 보여 줄 메시지 창의 제목입니다. 메시지 텍스트와 함께 지정합니다.',
+    msgText: '로그온하기 전에 사용자에게 보여 줄 메시지 본문입니다. 경고나 사용 규칙을 안내할 때 씁니다.',
+    noLastUser: '「사용」이면 로그온 화면에 마지막으로 로그온한 사용자 이름을 보여 주지 않습니다.',
+    pwWarn: '암호가 만료되기 며칠 전부터 사용자에게 암호를 바꾸라고 알릴지 정합니다.',
+    shutdownNoLogon: '「사용」이면 로그온하지 않고도 로그온 화면에서 시스템을 종료할 수 있습니다.',
+    anonSid: '「사용」이면 익명 사용자가 다른 사용자의 SID로 계정 이름을 조회할 수 있습니다.',
+    printerDrivers: '「사용」이면 Administrators와 Power Users만 프린터 드라이버를 설치할 수 있습니다.',
+  };
 
   function create(ctx) {
     const ui = { sel: 'root', open: new Set(['root']), row: null };
@@ -66,16 +80,47 @@
           dbl: k => openPolicy(k),
           context: (k, at) => menu(at, rowMenu(k)),
         });
+      } else if (ui.sel === 'opts') {
+        const rows = M.CAT.SECOPTS.map(o => ({ key: o.key, cells: [h('span', { class: 'cellic' }, icon('doc'), o.label), M.secoptText(st, o.key)] }));
+        right = listView([{ label: '정책', w: '64%' }, { label: '보안 설정' }], rows, ui.row, {
+          select: k => { ui.row = k; },
+          dbl: k => openOpt(k),
+          context: (k, at) => menu(at, [{ label: '속성', bold: true, onClick: () => openOpt(k) }, { sep: true }, { label: '도움말', out: true }]),
+        });
       } else if (CHILD[ui.sel]) {
         right = listView([{ label: '이름' }], CHILD[ui.sel].map(n => ({ key: n, cells: [h('span', { class: 'cellic' }, icon('folder'), n)] })), null, {});
       } else right = TK.OUT_NODE();
       rhost.appendChild(right);
     }
+    /* 보안 옵션 속성: 글자(제목·이름), 여러 줄 글자(메시지 텍스트), 사용/사용 안 함, 일수 */
+    function openOpt(key) {
+      const st = ctx.st(), d = M.secoptDef(key), cur = st.secopt[key];
+      let val = cur, input = null;
+      const head = h('div', { class: 'polhead' }, icon('doc', 'big'), h('b', {}, d.label));
+      let body;
+      if (d.kind === 'bool') body = h('div', { class: 'polbody' }, head, radio('sov', '사용', !!cur, () => { val = true; }), radio('sov', '사용 안 함', !cur, () => { val = false; }));
+      else if (d.kind === 'textarea') { input = h('textarea', { class: 'tarea', rows: 5, 'aria-label': d.label, spellcheck: false }); input.value = cur; body = h('div', { class: 'polbody' }, head, input); }
+      else if (d.kind === 'days') { input = spin({ value: cur, min: 0, max: 999, label: d.label, width: 5 }); body = h('div', { class: 'polbody' }, head, h('div', { class: 'fin' }, h('span', {}, '암호 만료 전에 사용자에게 알림:'), input, h('span', {}, '일'))); }
+      else { input = h('input', { type: 'text', class: 'tin', value: cur, 'aria-label': d.label, spellcheck: false, style: { width: '100%' } }); body = h('div', { class: 'polbody' }, head, input); }
+      let dlg;
+      function apply(closeAfter) {
+        const v = d.kind === 'bool' ? val : input.value;
+        const r = M.secoptSet(ctx.st(), key, v);
+        if (!r.ok) { msg({ title: d.label, icon: 'err', text: r.error }); return; }
+        ctx.commit();
+        if (closeAfter) dlg.close('확인');
+      }
+      dlg = dialog({ title: d.label, width: 40, body: tabs([{ id: 'set', label: '로컬 보안 설정', body }, { id: 'exp', label: '설명', body: h('div', { class: 'explain' }, h('h4', {}, d.label), h('p', {}, OPT_EXPLAIN[key] || '이 정책의 값을 지정합니다.')) }]),
+        buttons: [{ label: '확인', primary: true, keep: true, onClick: () => apply(true) }, { label: '취소', cancel: true }, { label: '적용', keep: true, onClick: () => apply(false) }] });
+    }
     function nodeMenu(id) {
       return [{ label: '보기', out: true }, { label: '새로 고침', onClick: renderRight }, { label: '목록 내보내기', out: true }, { sep: true }, { label: '도움말', out: true }];
     }
     function rowMenu(k) { return [{ label: '속성', bold: true, onClick: () => openPolicy(k) }, { sep: true }, { label: '도움말', out: true }]; }
-    function actionMenu() { return ui.row && (ui.sel === 'pw' || ui.sel === 'lock') ? rowMenu(ui.row) : nodeMenu(ui.sel); }
+    function actionMenu() {
+      if (ui.row && ui.sel === 'opts') return [{ label: '속성', bold: true, onClick: () => openOpt(ui.row) }];
+      return ui.row && (ui.sel === 'pw' || ui.sel === 'lock') ? rowMenu(ui.row) : nodeMenu(ui.sel);
+    }
 
     function openPolicy(key) {
       const st = ctx.st(), d = M.SEC[key];

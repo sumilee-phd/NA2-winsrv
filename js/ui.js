@@ -36,6 +36,13 @@
     folder: `<path d="M2.5 8.5h10.5l2.5 3h14v15.5h-27z" fill="#F4CF67" stroke="#B88A1E" stroke-width="1.8"/><path d="M2.5 13.5h27" stroke="#B88A1E" stroke-width="1.2"/>`,
     doc: `<path d="M8 3.5h11l5.5 5.5v19.5H8z" fill="#FFFFFF" stroke="#6B6B6B" stroke-width="1.8"/><path d="M19 3.5v5.5h5.5" fill="none" stroke="#6B6B6B" stroke-width="1.6"/><path d="M11.5 14h9M11.5 18.5h9M11.5 23h6" stroke="#1F5FA8" stroke-width="1.8"/>`,
     server: `<rect x="7" y="3.5" width="18" height="25" rx="1.5" fill="#E6E6E6" stroke="#5A5A5A" stroke-width="2"/><path d="M10.5 9.5h11M10.5 14h11" stroke="#5A5A5A" stroke-width="2"/><circle cx="16" cy="22" r="2" fill="#2F9E44"/>`,
+    site: `<circle cx="16" cy="16" r="12" fill="#CFE6FA" stroke="#1F5FA8" stroke-width="2"/><path d="M8 11c3 1 4 4 7 3s2-5 5-5M7 20c3-1 5 2 8 1s4 2 6 4" fill="none" stroke="#2F7D32" stroke-width="2.2"/>`,
+    ftp: `<circle cx="13" cy="15" r="10" fill="#CFE6FA" stroke="#1F5FA8" stroke-width="2"/><path d="M7 11c2.5 1 3.5 3 6 2.5S15 9 17.5 9" fill="none" stroke="#2F7D32" stroke-width="2"/><rect x="16" y="17" width="13" height="11" rx="1.5" fill="#FFFFFF" stroke="#5A5A5A" stroke-width="1.8"/><path d="M19.5 22.5h6M23 20l2.5 2.5L23 25" fill="none" stroke="#1F5FA8" stroke-width="1.8"/>`,
+    feat: `<rect x="5" y="5" width="22" height="22" rx="2" fill="#FFFFFF" stroke="#6B6B6B" stroke-width="1.8"/><path d="M9 11h14M9 16h14M9 21h9" stroke="#1F5FA8" stroke-width="2"/><circle cx="23" cy="21" r="2.4" fill="#F2C744" stroke="#A67C00" stroke-width="1"/>`,
+    user: `<circle cx="16" cy="11" r="6" fill="#F6D2B0" stroke="#8A5A2B" stroke-width="1.8"/><path d="M5 28c1-7 5.5-10 11-10s10 3 11 10z" fill="#5B8FD6" stroke="#1F5FA8" stroke-width="1.8"/>`,
+    group: `<circle cx="11" cy="12" r="5" fill="#F6D2B0" stroke="#8A5A2B" stroke-width="1.6"/><circle cx="21.5" cy="10.5" r="4.5" fill="#F6D2B0" stroke="#8A5A2B" stroke-width="1.6"/><path d="M15 27c.8-5.5 3.5-8 7-8s6 2.5 7 8z" fill="#7FB069" stroke="#3E7A2B" stroke-width="1.6"/><path d="M2.5 28c.8-6 4-9 8.5-9s7.7 3 8.5 9z" fill="#5B8FD6" stroke="#1F5FA8" stroke-width="1.6"/>`,
+    svc: `<circle cx="16" cy="16" r="6.5" fill="#D9D9D9" stroke="#4D4D4D" stroke-width="2"/><path d="M16 3.5v5M16 23.5v5M3.5 16h5M23.5 16h5M7.2 7.2l3.5 3.5M21.3 21.3l3.5 3.5M7.2 24.8l3.5-3.5M21.3 10.7l3.5-3.5" stroke="#4D4D4D" stroke-width="3"/><circle cx="16" cy="16" r="2.5" fill="#FFFFFF"/>`,
+    comp: `<rect x="3.5" y="5" width="25" height="16" rx="1.5" fill="#DCEBFA" stroke="#1F5FA8" stroke-width="2"/><path d="M12 25h8M16 21v4" stroke="#5A5A5A" stroke-width="2.4"/><path d="M9 14l3-3 3 3 4-5 4 5" fill="none" stroke="#2F7D32" stroke-width="1.8"/>`,
   };
   function icon(name, cls) {
     const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -47,22 +54,40 @@
   }
 
   /* ---------------------------------------------------------- 오른쪽 단추 메뉴 */
-  let openMenu = null;
-  function closeMenu() { if (openMenu) { openMenu.remove(); openMenu = null; } document.removeEventListener('mousedown', outside, true); }
-  function outside(e) { if (openMenu && !openMenu.contains(e.target)) closeMenu(); }
-  /* at: {x,y} 또는 기준 요소. items: {label, onClick, disabled, out, tip, sep, bold} */
-  function menu(at, items) {
-    closeMenu();
+  const menus = [];
+  function closeMenu(level) {
+    level = level || 0;
+    while (menus.length > level) menus.pop().remove();
+    if (!menus.length) document.removeEventListener('mousedown', outside, true);
+  }
+  function outside(e) { if (!menus.some(m => m.contains(e.target))) closeMenu(0); }
+  /* at: {x,y} 또는 기준 요소. items: {label, onClick, disabled, out, tip, sep, bold, sub:[하위 항목]} */
+  function menu(at, items, level) {
+    level = level || 0;
+    closeMenu(level);
     const el = h('div', { class: 'menu', role: 'menu' });
     let first = null;
     for (const it of items) {
       if (!it) continue;
       if (it.sep) { el.appendChild(h('div', { class: 'msep', role: 'separator' })); continue; }
       const dis = it.out || (typeof it.disabled === 'function' ? it.disabled() : it.disabled);
-      const b = h('button', { type: 'button', class: 'mi' + (it.bold ? ' bold' : '') + (it.out ? ' out' : ''), role: 'menuitem', disabled: !!dis,
-        title: it.out ? OUT_TIP : (it.tip || '') }, h('span', { class: 'ml' }, it.label), it.out ? h('span', { class: 'mtag' }, '연습 범위 밖') : null);
+      const b = h('button', { type: 'button', class: 'mi' + (it.bold ? ' bold' : '') + (it.out ? ' out' : ''), role: 'menuitem', disabled: !!dis, 'aria-haspopup': it.sub ? 'menu' : null,
+        title: it.out ? OUT_TIP : (it.tip || '') }, h('span', { class: 'ml' }, it.label), it.out ? h('span', { class: 'mtag' }, '연습 범위 밖') : null, it.sub ? h('span', { class: 'marrow', 'aria-hidden': 'true' }, '▶') : null);
       if (!dis) {
-        b.addEventListener('click', e => { e.stopPropagation(); closeMenu(); if (it.onClick) it.onClick(); });
+        if (it.sub) {
+          const open = focus => {
+            const r = b.getBoundingClientRect();
+            const m = menu({ x: r.right - 3, y: r.top - 4, left: r.left }, it.sub, level + 1);
+            [...el.children].forEach(c => c.classList && c.classList.remove('hot')); b.classList.add('hot');
+            if (!focus) b.focus({ preventScroll: true }); else { const f = m.querySelector('.mi:not([disabled])'); if (f) f.focus(); }
+          };
+          b.addEventListener('click', e => { e.stopPropagation(); open(true); });
+          b.addEventListener('mouseenter', () => open(false));
+          b.addEventListener('keydown', e => { if (e.key === 'ArrowRight' || e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); open(true); } });
+        } else {
+          b.addEventListener('mouseenter', () => { closeMenu(level + 1); b.focus({ preventScroll: true }); });
+          b.addEventListener('click', e => { e.stopPropagation(); closeMenu(0); if (it.onClick) it.onClick(); });
+        }
         if (!first) first = b;
       }
       el.appendChild(b);
@@ -72,19 +97,21 @@
       const i = bs.indexOf(document.activeElement);
       if (e.key === 'ArrowDown') { e.preventDefault(); (bs[i + 1] || bs[0]).focus(); }
       else if (e.key === 'ArrowUp') { e.preventDefault(); (bs[i - 1] || bs[bs.length - 1]).focus(); }
-      else if (e.key === 'Escape') { e.preventDefault(); closeMenu(); }
+      else if (e.key === 'Escape') { e.preventDefault(); closeMenu(0); }
+      else if (e.key === 'ArrowLeft' && level > 0) { e.preventDefault(); closeMenu(level); const p = menus[level - 1] && menus[level - 1].querySelector('.mi.hot'); if (p) p.focus(); }
+      e.stopPropagation();
     });
     document.body.appendChild(el);
     let x, y;
     if (at && at.getBoundingClientRect) { const r = at.getBoundingClientRect(); x = r.left; y = r.bottom + 2; }
     else { x = at.x; y = at.y; }
     const mw = el.offsetWidth, mh = el.offsetHeight;
-    if (x + mw > innerWidth - 6) x = Math.max(6, innerWidth - mw - 6);
+    if (x + mw > innerWidth - 6) x = at && at.left != null ? Math.max(6, at.left - mw + 3) : Math.max(6, innerWidth - mw - 6);
     if (y + mh > innerHeight - 6) y = Math.max(6, innerHeight - mh - 6);
     el.style.left = x + 'px'; el.style.top = y + 'px';
-    openMenu = el;
-    setTimeout(() => document.addEventListener('mousedown', outside, true), 0);
-    if (first) first.focus({ preventScroll: true });
+    menus.push(el);
+    if (level === 0) setTimeout(() => document.addEventListener('mousedown', outside, true), 0);
+    if (first && level === 0) first.focus({ preventScroll: true });
     return el;
   }
 
@@ -377,7 +404,7 @@
       root.querySelectorAll('.trow.sel').forEach(r => { r.classList.remove('sel'); r.setAttribute('aria-selected', 'false'); r.tabIndex = -1; });
       row.classList.add('sel'); row.setAttribute('aria-selected', 'true'); row.tabIndex = 0;
       if (focus) row.focus();
-      if (ui.sel !== row.dataset.id) { ui.sel = row.dataset.id; on.select(row.dataset.id); }
+      if (ui.sel !== row.dataset.id || on.reselect) { ui.sel = row.dataset.id; on.select(row.dataset.id); }   // reselect: 이미 선택한 항목을 다시 눌러도 알림(IIS 저장 확인)
     }
     function add(list, parent, depth) {
       for (const n of list) {

@@ -11,9 +11,13 @@
 
   var TYPES = [
     { id: 'net', no: 1, name: '네트워크 속성', tool: 'net', desc: 'TCP/IPv4 주소 · 서브넷 마스크 · 게이트웨이 · DNS 서버' },
-    { id: 'sec', no: 2, name: '로컬 보안 정책', tool: 'sec', desc: '암호 정책 · 계정 잠금 정책' },
+    { id: 'sec', no: 2, name: '로컬 보안 정책', tool: 'sec', desc: '암호 정책 · 계정 잠금 정책 · 보안 옵션(로그온 메시지·계정 이름)' },
     { id: 'dhcp', no: 3, name: 'DHCP', tool: 'dhcp', desc: '새 범위 마법사 · 제외 범위 · 임대 기간 · 옵션' },
-    { id: 'dns', no: 4, name: 'DNS', tool: 'dns', desc: '새 영역 · 호스트(A) · 별칭(CNAME) · SOA' },
+    { id: 'dns', no: 4, name: 'DNS', tool: 'dns', desc: '새 영역 · 호스트(A) · 별칭(CNAME) · SOA · 영어형 문제' },
+    { id: 'web', no: 5, name: '웹(IIS)', tool: 'iis', desc: '웹 사이트 추가 · 고급 설정 · 기본 문서 · 인증 · IP 제한 · 오류 페이지 · SMTP' },
+    { id: 'ftp', no: 6, name: 'FTP', tool: 'iis', desc: 'FTP 사이트 추가 · 고급 설정 · 디렉터리 검색 · 방화벽 지원 · 메시지 · 저장 확인' },
+    { id: 'user', no: 7, name: '로컬 사용자 및 그룹', tool: 'users', desc: '새 사용자 · 소속 그룹 · 세션 · 원격 제어 · 전화 접속 로그인 · 새 그룹' },
+    { id: 'svc', no: 8, name: '서비스', tool: 'svc', desc: '설명으로 서비스 찾기 · 시작 유형 · 서비스 상태' },
   ];
   var NONE = '(비어 있음)', MISSING = '(없음)';
 
@@ -118,6 +122,115 @@
       function (st) { var z = M.findZone(st, zone); return !!z && M.ttlSecs(z.soa.ttl) === sec; });
   }
 
+  // 보안 옵션
+  function secopt(key, value) {
+    return C(M.secoptDef(key).label, M.secoptValueText(key, value) || NONE, function (st) { return M.secoptText(st, key) || NONE; });
+  }
+  // IIS 공통
+  function siteC(name, label, expect, fn, ok) {
+    return C('사이트 ' + name + ' · ' + label, expect, function (st) { var s = M.findSite(st, name); return s ? fn(s) : '(사이트 없음)'; }, ok);
+  }
+  function siteExists(name, kind) {
+    return C(kind === 'ftp' ? 'FTP 사이트 이름' : '웹 사이트 이름', name, function (st) {
+      var s = M.findSite(st, name);
+      return s ? s.name + (s.kind !== kind ? ' (' + (s.kind === 'ftp' ? 'FTP 사이트' : '웹 사이트') + ')' : '') : (st.iis.sites.filter(function (x) { return x.kind === kind; }).map(function (x) { return x.name; }).join(', ') || MISSING);
+    });
+  }
+  function sitePath(name, path) { return siteC(name, '실제 경로', path, function (s) { return s.path; }); }
+  function siteIp(name, ip) { return siteC(name, '바인딩 IP 주소', M.bindIpText(ip), function (s) { return M.bindIpText(s.bindings[0].ip); }); }
+  function sitePort(name, port) { return siteC(name, '바인딩 포트', String(port), function (s) { return String(s.bindings[0].port); }); }
+  function siteHost(name, host) { return siteC(name, '바인딩 호스트 이름', host || NONE, function (s) { return s.bindings[0].host || NONE; }); }
+  function siteStarted(name) { return siteC(name, '상태', '시작됨', function (s) { return s.started ? '시작됨' : '중지됨'; }); }
+  function siteAdv(name, key, value) {
+    var def = null;
+    ['web', 'ftp'].forEach(function (k) { M.ADV[k].forEach(function (d) { if (d.key === key && !def) def = d; }); });
+    return siteC(name, '고급 설정 ' + def.label, String(value), function (s) { return M.advValue(s, key); });
+  }
+  function siteDocs(name, docs) { return siteC(name, '기본 문서', docs.join(', '), function (s) { return s.docs.join(', ') || NONE; }); }
+  function siteAuth(name, kind, on) {
+    var lab = { anon: '익명 인증', basic: '기본 인증', windows: 'Windows 인증' }[kind];
+    return siteC(name, lab, on ? '사용' : '사용 안 함', function (s) { return s.auth[kind] ? '사용' : '사용 안 함'; });
+  }
+  function siteIpRule(name, mode, ip, mask) {
+    var want = (mode === 'allow' ? '허용 ' : '거부 ') + ip + (mask ? ' (' + mask + ')' : '');
+    return siteC(name, 'IP 주소 및 도메인 제한 항목', want, function (s) {
+      var hit = s.ipRules.filter(function (r) { return r.mode === mode && r.ip === ip && r.mask === (mask || ''); })[0];
+      return hit ? want : (s.ipRules.map(function (r) { return (r.mode === 'allow' ? '허용 ' : '거부 ') + r.ip + (r.mask ? ' (' + r.mask + ')' : ''); }).join(', ') || MISSING);
+    });
+  }
+  function siteIpDefault(name, mode) { return siteC(name, '지정되지 않은 클라이언트에 대한 액세스', mode === 'allow' ? '허용' : '거부', function (s) { return s.ipDefault === 'allow' ? '허용' : '거부'; }); }
+  function siteError(name, code, mode, path) {
+    var mt = { file: '파일', url: 'URL 실행', redirect: '리디렉션' };
+    return siteC(name, '오류 페이지 ' + code, mt[mode] + ' ' + path, function (s) { var e = s.errors.filter(function (x) { return x.code === code; })[0]; return e ? mt[e.mode] + ' ' + e.path : MISSING; });
+  }
+  function siteSmtp(name, key, value) {
+    var lab = { to: 'SMTP 전자 메일 주소', server: 'SMTP 서버', port: 'SMTP 포트' }[key];
+    return siteC(name, lab, String(value), function (s) { return String(s.smtp[key]) || NONE; });
+  }
+  // FTP
+  function ftpSsl(name, v) { var t = { none: '없음', allow: '허용', require: '필요' }; return siteC(name, 'SSL', t[v], function (s) { return t[s.ssl]; }); }
+  function ftpAuth(name, kind, on) { return siteC(name, kind === 'anon' ? 'FTP 익명 인증' : 'FTP 기본 인증', on ? '사용' : '사용 안 함', function (s) { return s.auth[kind] ? '사용' : '사용 안 함'; }); }
+  function ftpRule(name, who, value, read, write) {
+    var want = '허용 · ' + M.authzText({ who: who, value: value }) + ' · ' + M.permText({ read: read, write: write });
+    return siteC(name, 'FTP 권한 부여 규칙', want, function (s) {
+      var hit = s.authz.filter(function (r) { return r.mode === 'allow' && r.who === who && (r.value || '').toLowerCase() === (value || '').toLowerCase() && r.read === read && r.write === write; })[0];
+      return hit ? want : (s.authz.map(function (r) { return (r.mode === 'allow' ? '허용' : '거부') + ' · ' + M.authzText(r) + ' · ' + M.permText(r); }).join(' / ') || MISSING);
+    });
+  }
+  function ftpDir(name, style, opt) {
+    return siteC(name, 'FTP 디렉터리 목록 스타일', style, function (s) { return s.dirBrowse.style; });
+  }
+  function ftpDirOpt(name, key, on) {
+    var lab = { virtualDirs: '가상 디렉터리', bytes: '사용 가능한 바이트 수', year4: '4자리 연도' }[key];
+    return siteC(name, '디렉터리 목록 옵션 ' + lab, on ? '선택' : '선택 안 함', function (s) { return s.dirBrowse[key] ? '선택' : '선택 안 함'; });
+  }
+  function ftpFw(name, ip) { return siteC(name, 'FTP 방화벽의 외부 IP 주소', ip, function (s) { return s.firewall.extIp || NONE; }); }
+  function ftpMsg(name, key, text) {
+    var lab = { banner: 'FTP 메시지 배너', welcome: 'FTP 메시지 시작', exit: 'FTP 메시지 끝내기', maxConn: 'FTP 메시지 최대 연결 수' }[key];
+    return siteC(name, lab, text, function (s) { return s.msg[key] || NONE; }, function (st) { var s = M.findSite(st, name); return !!s && s.msg[key].trim() === text; });
+  }
+  // 로컬 사용자 및 그룹
+  function userC(name, label, expect, fn) {
+    return C('사용자 ' + name + ' · ' + label, expect, function (st) { var u = M.findUser(st, name); return u ? fn(u) : '(사용자 없음)'; });
+  }
+  function userExists(name) { return C('사용자 이름', name, function (st) { var u = M.findUser(st, name); return u ? u.name : MISSING; }); }
+  function userField(name, key, value) {
+    var lab = { full: '전체 이름', desc: '설명', pw: '암호' }[key];
+    return userC(name, lab, value, function (u) { return u[key] || NONE; });
+  }
+  function userFlag(name, key, on) {
+    var lab = { mustChange: '다음 로그온할 때 반드시 암호 변경', cantChange: '사용자가 암호를 변경할 수 없음', neverExpire: '암호 사용 기간 제한 없음', disabled: '계정 사용 안 함' }[key];
+    return userC(name, lab, on ? '선택' : '선택 안 함', function (u) { return u[key] ? '선택' : '선택 안 함'; });
+  }
+  function userGroup(name, groupName) {
+    return C('사용자 ' + name + ' · 소속 그룹', groupName + ' 포함', function (st) {
+      var u = M.findUser(st, name); if (!u) return '(사용자 없음)';
+      var gs = M.groupsOf(st, u.name); return gs.indexOf(groupName) >= 0 ? groupName + ' 포함' : (gs.join(', ') || MISSING);
+    });
+  }
+  function userSession(name, key, value) {
+    var lab = { disc: '연결 끊긴 세션 끝내기', active: '활성 세션 제한', idle: '유휴 세션 제한' }[key];
+    return userC(name, '세션 ' + lab, value, function (u) { return u.session[key]; });
+  }
+  function userRemote(name, on) { return userC(name, '원격 제어 가능', on ? '선택' : '선택 안 함', function (u) { return u.remote.enabled ? '선택' : '선택 안 함'; }); }
+  function userRemoteLevel(name, level) { var t = { view: '사용자 세션 보기', interact: '세션과 상호 작용' }; return userC(name, '원격 제어 수준', t[level], function (u) { return t[u.remote.level]; }); }
+  function userDial(name, access) {
+    var t = { allow: '액세스 허용', deny: '액세스 거부', nps: 'NPS 네트워크 정책을 통해 액세스 제어' };
+    return userC(name, '네트워크 액세스 권한', t[access], function (u) { return t[u.dial.access]; });
+  }
+  function groupMember(group, user) {
+    return C('그룹 ' + group + ' · 구성원', user + ' 포함', function (st) {
+      var g = M.findGroup(st, group); if (!g) return '(그룹 없음)';
+      return g.members.some(function (m) { return m.toLowerCase() === user.toLowerCase(); }) ? user + ' 포함' : (g.members.join(', ') || MISSING);
+    });
+  }
+  function groupExists(name) { return C('그룹 이름', name, function (st) { var g = M.findGroup(st, name); return g ? g.name : MISSING; }); }
+  function groupDesc(name, desc) { return C('그룹 ' + name + ' · 설명', desc, function (st) { var g = M.findGroup(st, name); return g ? (g.desc || NONE) : '(그룹 없음)'; }); }
+  // 서비스
+  function svcName(svc) { return M.CAT.SERVICES.filter(function (s) { return s.name === svc; })[0].display; }
+  function svcStart(svc, start) { return C(svcName(svc) + ' · 시작 유형', start, function (st) { return M.svcGet(st, svc).start; }); }
+  function svcStatus(svc, status) { return C(svcName(svc) + ' · 서비스 상태', status, function (st) { return M.svcGet(st, svc).status; }); }
+
   /* ---------------------------------------------------------- 과제 */
   var L1 = '로컬 영역 연결', L2 = '로컬 영역 연결 2';
   var OPEN_NET = '바탕의 「네트워크 연결」을 엽니다. 대상 연결을 마우스 오른쪽 단추로 누르고 「속성」을 고릅니다.';
@@ -125,6 +238,9 @@
   var OPEN_SEC = '바탕의 「로컬 보안 정책」을 엽니다. 왼쪽 트리에서 「계정 정책」 아래의 정책 폴더를 선택합니다.';
   var OPEN_DHCP = '바탕의 「DHCP」를 엽니다. 트리에서 서버 아래 「IPv4」를 먼저 왼쪽 단추로 선택한 뒤 마우스 오른쪽 단추로 누르고 「새 범위」를 고릅니다.';
   var OPEN_DNS = '바탕의 「DNS 관리자」를 엽니다. 트리에서 서버 아래 「정방향 조회 영역」을 펼칩니다.';
+  var OPEN_IIS = '바탕의 「IIS 관리자」를 엽니다. 왼쪽 연결 트리에서 서버 아래 「사이트」를 펼칩니다.';
+  var OPEN_USERS = '바탕의 「컴퓨터 관리」를 엽니다. 「시스템 도구」 > 「로컬 사용자 및 그룹」을 펼칩니다.';
+  var OPEN_SVC = '바탕의 「서비스」를 엽니다. 이름 열을 기준으로 정렬되어 있고, 목록에서 글자를 치면 그 글자로 시작하는 서비스로 이동합니다.';
 
   var TASKS = [
     /* ===================== 1. 네트워크 속성 ===================== */
@@ -176,6 +292,17 @@
       checks: [netMode(L1, false), netDnsMode(L1, false)],
       solve: function (st) { return M.setIpv4(st, 0, { auto: true, dnsAuto: true }); },
     },
+    {
+      id: 'net-5', type: 'net', title: '부서별 서브넷 계산 후 입력',
+      q: '192.168.150.0/24를 부서별로 나눕니다. 필요한 호스트 수가 많은 부서부터 앞쪽 주소를 줍니다(영업 50대, 개발 30대, 관리 10대). 서버는 개발 부서 서브넷에 속합니다. 서버 IP는 그 서브넷의 첫 번째 사용 가능 주소, 기본 게이트웨이는 마지막 사용 가능 주소입니다. DNS 서버는 192.168.150.2입니다.',
+      given: [['전체 네트워크', '192.168.150.0/24'], ['부서별 호스트 수', '영업 50 · 개발 30 · 관리 10 (큰 부서부터 앞쪽)'], ['서버 IP', '개발 서브넷의 첫 번째 사용 가능 주소'], ['기본 게이트웨이', '개발 서브넷의 마지막 사용 가능 주소'], ['기본 설정 DNS 서버', '192.168.150.2']],
+      steps: ['호스트 50대는 64개 블록(/26), 30대는 32개 블록(/27), 10대는 16개 블록(/28)이 필요합니다(블록 크기 - 2 ≥ 호스트 수).',
+        '영업 .0~.63, 개발 .64~.95, 관리 .96~.111입니다. 개발 서브넷의 마스크는 255.255.255.224입니다.',
+        '첫 번째 사용 가능 주소는 .65, 마지막 사용 가능 주소는 .94입니다(네트워크 주소 .64와 브로드캐스트 .95 제외).',
+        OPEN_NET, OPEN_V4],
+      checks: [netMode(L1, true), netField(L1, 'ip', '192.168.150.65'), netField(L1, 'mask', '255.255.255.224'), netField(L1, 'gw', '192.168.150.94'), netField(L1, 'dns1', '192.168.150.2')],
+      solve: function (st) { return M.setIpv4(st, 0, { auto: false, ip: '192.168.150.65', mask: '255.255.255.224', gw: '192.168.150.94', dnsAuto: false, dns1: '192.168.150.2' }); },
+    },
 
     /* ===================== 2. 로컬 보안 정책 ===================== */
     {
@@ -224,6 +351,27 @@
         '원래대로 설정 시간을 20분으로 바꿉니다.'],
       checks: [sec('minLen', 10), sec('lockThreshold', 3), sec('lockDuration', 0), sec('lockReset', 20)],
       solve: function (st) { M.secSet(st, 'minLen', 10); M.secSet(st, 'lockThreshold', 3); M.secSet(st, 'lockDuration', 0); return M.secSet(st, 'lockReset', 20); },
+    },
+    {
+      id: 'sec-5', type: 'sec', title: '보안 옵션: 로그온 메시지',
+      q: '사용자가 로그온할 때 다음 제목과 내용의 메시지가 나오도록 로컬 보안 정책의 보안 옵션을 설정하십시오.',
+      given: [['메시지 제목', '보안 안내'], ['메시지 텍스트', '인가된 사용자만 로그온할 수 있습니다.']],
+      steps: ['바탕의 「로컬 보안 정책」을 엽니다. 「로컬 정책」 > 「보안 옵션」을 선택합니다.',
+        '「대화형 로그온: 로그온을 시도하는 사용자에 대한 메시지 제목」을 두 번 눌러 제목을 입력하고 「확인」을 누릅니다.',
+        '바로 아래 「…메시지 텍스트」에 내용을 입력합니다. 글자, 띄어쓰기, 마침표까지 문제와 같게 씁니다.'],
+      checks: [secopt('msgTitle', '보안 안내'), secopt('msgText', '인가된 사용자만 로그온할 수 있습니다.')],
+      solve: function (st) { M.secoptSet(st, 'msgTitle', '보안 안내'); return M.secoptSet(st, 'msgText', '인가된 사용자만 로그온할 수 있습니다.'); },
+    },
+    {
+      id: 'sec-6', type: 'sec', title: '보안 옵션: 계정 이름과 Guest · 암호 만료',
+      q: '기본 제공 Administrator 계정의 이름을 srvadmin으로 바꾸고 Guest 계정을 사용하지 않도록 하십시오. 최대 암호 사용 기간은 30일입니다.',
+      given: [['계정: Administrator 계정 이름 바꾸기', 'srvadmin'], ['계정: Guest 계정 상태', '사용 안 함'], ['최대 암호 사용 기간', '30일']],
+      setup: function (st) { M.secoptSet(st, 'guestOn', true); },
+      steps: ['바탕의 「로컬 보안 정책」을 엽니다. 「로컬 정책」 > 「보안 옵션」에서 「계정:」으로 시작하는 정책을 찾습니다.',
+        'Guest 계정 상태는 현재 「사용」입니다. 「사용 안 함」으로 바꿉니다.',
+        '「계정 정책」 > 「암호 정책」의 최대 암호 사용 기간을 30일로 바꿉니다.'],
+      checks: [secopt('adminName', 'srvadmin'), secopt('guestOn', false), sec('maxAge', 30)],
+      solve: function (st) { M.secoptSet(st, 'adminName', 'srvadmin'); M.secoptSet(st, 'guestOn', false); return M.secSet(st, 'maxAge', 30); },
     },
 
     /* ===================== 3. DHCP ===================== */
@@ -380,6 +528,230 @@
         s.serial += 1; s.primary = 'ns1.branch.test'; s.retry = { v: 5, u: '분' };
         return M.setSoa(st, r.index, s);
       },
+    },
+    {
+      id: 'dns-5', type: 'dns', title: '영어형 문제: 영역 · 메일 호스트 · SOA(초)',
+      q: 'Create a primary forward lookup zone named corp.test with a new zone file and no dynamic updates. Add a host (A) record named mail with the IPv4 address 10.40.0.25. Then set the SOA refresh interval to 1800 and the retry interval to 300 (unit: seconds).',
+      given: [['Zone type / name', 'Primary zone · corp.test'], ['Dynamic update', 'Do not allow dynamic updates'], ['Host (A)', 'mail → 10.40.0.25'], ['Refresh interval', '1800 (unit: seconds)'], ['Retry interval', '300 (unit: seconds)']],
+      steps: ['영어형 문제도 화면은 한국어입니다. primary zone = 주 영역, forward lookup zone = 정방향 조회 영역, dynamic update = 동적 업데이트입니다.',
+        OPEN_DNS + ' 「정방향 조회 영역」을 선택한 뒤 마우스 오른쪽 단추 > 「새 영역」으로 corp.test를 만듭니다.',
+        'host (A) record는 「새 호스트(A 또는 AAAA)」입니다. 이름 mail, IP 주소 10.40.0.25를 넣고 「호스트 추가」를 누릅니다.',
+        '영역 속성 > 「SOA(권한 시작)」에서 refresh interval = 새로 고침 간격, retry interval = 다시 시도 간격입니다. 단위 상자를 「초」로 바꾸고 1800, 300을 넣습니다.'],
+      checks: [zoneExists('corp.test'), zoneType('corp.test'), zoneDyn('corp.test', 'none'), recA('corp.test', 'mail', '10.40.0.25'), soaTime('corp.test', 'refresh', 1800), soaTime('corp.test', 'retry', 300)],
+      solve: function (st) {
+        var r = M.createZone(st, { type: 'primary', name: 'corp.test', dyn: 'none' });
+        M.addHost(st, r.index, { name: 'mail', ip: '10.40.0.25' });
+        var s = M.clone(st.dns.zones[r.index].soa); s.refresh = { v: 1800, u: '초' }; s.retry = { v: 300, u: '초' };
+        return M.setSoa(st, r.index, s);
+      },
+    },
+    {
+      id: 'dns-6', type: 'dns', title: '영어형 문제: 호스트와 별칭',
+      q: 'In the existing zone sales.test, add a host (A) record named www with the IP address 10.41.0.80, and an alias (CNAME) record named portal that points to www.sales.test.',
+      given: [['Zone', 'sales.test (already exists)'], ['Host (A)', 'www → 10.41.0.80'], ['Alias (CNAME)', 'portal → www.sales.test']],
+      setup: function (st) { M.createZone(st, { type: 'primary', name: 'sales.test', dyn: 'none' }); },
+      steps: [OPEN_DNS + ' 영역 sales.test를 선택합니다.', 'alias (CNAME) record = 「새 별칭(CNAME)」, points to = 「대상 호스트의 정규화된 도메인 이름(FQDN)」입니다.',
+        '호스트 www를 먼저 만들고, 별칭 portal의 대상에 www.sales.test를 입력합니다.'],
+      checks: [recA('sales.test', 'www', '10.41.0.80'), recCname('sales.test', 'portal', 'www.sales.test')],
+      solve: function (st) { var zi = M.zoneIndex(st, 'sales.test'); M.addHost(st, zi, { name: 'www', ip: '10.41.0.80' }); return M.addAlias(st, zi, { name: 'portal', target: 'www.sales.test' }); },
+    },
+
+    /* ===================== 5. 웹(IIS) ===================== */
+    {
+      id: 'web-1', type: 'web', title: '웹 사이트 추가와 바인딩',
+      q: 'IIS 관리자에서 다음 웹 사이트를 추가하십시오. 사이트는 바로 시작합니다.',
+      given: [['사이트 이름', 'CAMPUS-WEB'], ['실제 경로', 'C:\\inetpub\\campus'], ['IP 주소', '172.16.10.10'], ['포트', '8080'], ['호스트 이름', 'www.campus.test']],
+      steps: [OPEN_IIS, '「사이트」를 마우스 오른쪽 단추로 누르고 「웹 사이트 추가」를 고릅니다.',
+        '사이트 이름과 실제 경로는 대소문자와 \\까지 그대로 입력합니다. \\는 Enter 위의 ₩ 키입니다.',
+        'IP 주소 칸은 목록에서 고르거나 직접 입력합니다. 포트와 호스트 이름을 넣고 「웹 사이트 즉시 시작」을 확인한 뒤 「확인」을 누릅니다.'],
+      checks: [siteExists('CAMPUS-WEB', 'web'), sitePath('CAMPUS-WEB', 'C:\\inetpub\\campus'), siteIp('CAMPUS-WEB', '172.16.10.10'), sitePort('CAMPUS-WEB', 8080), siteHost('CAMPUS-WEB', 'www.campus.test'), siteStarted('CAMPUS-WEB')],
+      solve: function (st) { return M.addWebSite(st, { name: 'CAMPUS-WEB', path: 'C:\\inetpub\\campus', ip: '172.16.10.10', port: 8080, host: 'www.campus.test' }); },
+    },
+    {
+      id: 'web-2', type: 'web', title: '연결 제한과 기본 문서',
+      q: '웹 사이트 LIB-WEB을 추가하고 고급 설정의 연결 제한과 기본 문서를 다음과 같이 설정하십시오.',
+      given: [['사이트 이름', 'LIB-WEB'], ['실제 경로', 'C:\\web\\library'], ['IP 주소', '지정하지 않은 모든 IP'], ['포트', '8088'], ['연결 시간 제한(초)', '240'], ['최대 동시 연결', '100'], ['기본 문서', 'index.html만 남김']],
+      steps: [OPEN_IIS, '사이트를 추가합니다. 호스트 이름은 비워 둡니다.',
+        '만든 사이트를 마우스 오른쪽 단추로 누르고 「웹 사이트 관리」 ▶ 「고급 설정」을 엽니다. 「연결 제한」 묶음의 두 값을 고칩니다.',
+        '사이트를 선택한 뒤 가운데의 「기본 문서」를 두 번 누릅니다. index.html을 뺀 나머지를 하나씩 선택해 「제거」합니다.'],
+      checks: [siteExists('LIB-WEB', 'web'), sitePath('LIB-WEB', 'C:\\web\\library'), sitePort('LIB-WEB', 8088), siteAdv('LIB-WEB', 'connTimeout', 240), siteAdv('LIB-WEB', 'maxConn', 100), siteDocs('LIB-WEB', ['index.html'])],
+      solve: function (st) {
+        var r = M.addWebSite(st, { name: 'LIB-WEB', path: 'C:\\web\\library', ip: '*', port: 8088, host: '' });
+        M.setAdv(st, r.id, 'connTimeout', '240'); M.setAdv(st, r.id, 'maxConn', '100');
+        var s = M.siteById(st, r.id); s.docs.slice().forEach(function (d) { if (d !== 'index.html') M.docRemove(st, r.id, s.docs.indexOf(d)); });
+        return { ok: true };
+      },
+    },
+    {
+      id: 'web-3', type: 'web', title: '인증과 IP 주소 제한',
+      q: '이미 있는 웹 사이트 SHOP-WEB의 익명 인증을 사용하지 않고 기본 인증을 사용하도록 하십시오. 192.168.70.25에서 오는 요청만 허용하고 지정되지 않은 클라이언트는 거부합니다.',
+      given: [['대상 사이트', 'SHOP-WEB (이미 있음)'], ['익명 인증', '사용 안 함'], ['기본 인증', '사용'], ['허용 항목', '특정 IPv4 주소 192.168.70.25'], ['지정되지 않은 클라이언트', '거부']],
+      setup: function (st) { M.addWebSite(st, { name: 'SHOP-WEB', path: 'C:\\web\\shop', ip: '*', port: 8090, host: '' }); },
+      steps: [OPEN_IIS + ' 「사이트」 아래 SHOP-WEB을 선택합니다.', '「인증」을 두 번 눌러 익명 인증을 선택하고 오른쪽 작업 창의 「사용 안 함」, 기본 인증은 「사용」을 누릅니다.',
+        '「기능 보기로 돌아가기」를 누르고 「IP 주소 및 도메인 제한」을 엽니다. 「허용 항목 추가」에 192.168.70.25를 넣습니다.',
+        '「기능 설정 편집」에서 지정되지 않은 클라이언트에 대한 액세스를 「거부」로 바꿉니다.'],
+      checks: [siteAuth('SHOP-WEB', 'anon', false), siteAuth('SHOP-WEB', 'basic', true), siteIpRule('SHOP-WEB', 'allow', '192.168.70.25'), siteIpDefault('SHOP-WEB', 'deny')],
+      solve: function (st) { var id = M.findSite(st, 'SHOP-WEB').id; M.setAuth(st, id, 'anon', false); M.setAuth(st, id, 'basic', true); M.ipRuleAdd(st, id, { mode: 'allow', ip: '192.168.70.25' }); M.ipDefaultSet(st, id, 'deny'); return { ok: true }; },
+    },
+    {
+      id: 'web-4', type: 'web', title: '오류 페이지와 SMTP 전자 메일',
+      q: '웹 사이트 HELP-WEB에서 404 오류가 나면 정적 파일 C:\\inetpub\\help\\notfound.htm의 내용을 보내도록 하십시오. SMTP 전자 메일은 주소 webmaster@campus.test, SMTP 서버 smtp.campus.test, 포트 25로 설정합니다.',
+      given: [['대상 사이트', 'HELP-WEB (이미 있음)'], ['오류 페이지 404', '정적 파일 C:\\inetpub\\help\\notfound.htm'], ['전자 메일 주소', 'webmaster@campus.test'], ['SMTP 서버', 'smtp.campus.test'], ['포트', '25']],
+      setup: function (st) { M.addWebSite(st, { name: 'HELP-WEB', path: 'C:\\inetpub\\help', ip: '*', port: 8081, host: '' }); },
+      steps: [OPEN_IIS + ' HELP-WEB을 선택합니다.', '「오류 페이지」에서 404를 두 번 눌러 「정적 파일의 콘텐츠를 오류 응답에 삽입」의 경로를 바꿉니다.',
+        '「SMTP 전자 메일」에서 주소와 서버를 입력한 뒤 오른쪽 「적용」을 누릅니다. 적용하지 않고 다른 곳을 누르면 저장 여부를 묻습니다.'],
+      checks: [siteError('HELP-WEB', 404, 'file', 'C:\\inetpub\\help\\notfound.htm'), siteSmtp('HELP-WEB', 'to', 'webmaster@campus.test'), siteSmtp('HELP-WEB', 'server', 'smtp.campus.test'), siteSmtp('HELP-WEB', 'port', 25)],
+      solve: function (st) { var id = M.findSite(st, 'HELP-WEB').id; M.errorSet(st, id, 404, { mode: 'file', path: 'C:\\inetpub\\help\\notfound.htm' }); return M.smtpSet(st, id, { to: 'webmaster@campus.test', server: 'smtp.campus.test', port: 25 }); },
+    },
+
+    /* ===================== 6. FTP ===================== */
+    {
+      id: 'ftp-1', type: 'ftp', title: 'FTP 사이트 추가(SSL 없음)',
+      q: '다음 FTP 사이트를 추가하십시오. 인증서가 없으므로 SSL은 사용하지 않습니다. 모든 사용자에게 읽기 권한만 줍니다.',
+      given: [['FTP 사이트 이름', 'CAMPUS-FTP'], ['실제 경로', 'C:\\inetpub\\ftproot\\campus'], ['IP 주소 / 포트', '172.16.10.10 / 21'], ['SSL', '없음'], ['인증', '익명, 기본'], ['액세스 허용 대상', '모든 사용자'], ['사용 권한', '읽기']],
+      steps: [OPEN_IIS, '「사이트」를 마우스 오른쪽 단추로 누르고 「FTP 사이트 추가」를 고릅니다.',
+        '「바인딩 및 SSL 설정」의 SSL 기본값은 「필요」입니다. 반드시 「없음」으로 바꿉니다.',
+        '「인증 및 권한 부여 정보」에서 익명·기본을 고르고, 액세스 허용 대상과 읽기 권한을 지정한 뒤 「마침」을 누릅니다.'],
+      checks: [siteExists('CAMPUS-FTP', 'ftp'), sitePath('CAMPUS-FTP', 'C:\\inetpub\\ftproot\\campus'), siteIp('CAMPUS-FTP', '172.16.10.10'), sitePort('CAMPUS-FTP', 21), ftpSsl('CAMPUS-FTP', 'none'),
+        ftpAuth('CAMPUS-FTP', 'anon', true), ftpAuth('CAMPUS-FTP', 'basic', true), ftpRule('CAMPUS-FTP', 'all', '', true, false)],
+      solve: function (st) { return M.addFtpSite(st, { name: 'CAMPUS-FTP', path: 'C:\\inetpub\\ftproot\\campus', ip: '172.16.10.10', port: 21, ssl: 'none', anon: true, basic: true, who: 'all', read: true }); },
+    },
+    {
+      id: 'ftp-2', type: 'ftp', title: 'FTP 고급 설정: 최대 연결 수 · 덮어쓰기',
+      q: 'FTP 사이트 DATA-FTP를 추가한 뒤 고급 설정에서 최대 연결 수와 이름을 바꿀 때 덮어쓰기 허용을 설정하십시오. Users 그룹에 읽기·쓰기 권한을 줍니다.',
+      given: [['FTP 사이트 이름', 'DATA-FTP'], ['실제 경로', 'C:\\ftp\\data'], ['IP 주소 / 포트', '지정하지 않은 모든 IP / 2100'], ['SSL', '없음'], ['인증', '기본'],
+        ['권한 부여', '지정한 역할 또는 사용자 그룹: Users, 읽기·쓰기'], ['최대 연결 수', '20'], ['이름을 바꿀 때 덮어쓰기 허용', 'True']],
+      steps: [OPEN_IIS, 'FTP 사이트를 추가합니다. 액세스 허용 대상은 「지정한 역할 또는 사용자 그룹」을 고르고 아래 칸에 Users를 입력합니다.',
+        '만든 사이트를 마우스 오른쪽 단추로 누르고 「FTP 사이트 관리」 ▶ 「고급 설정」을 엽니다.',
+        '「연결」의 최대 연결 수를 20으로, 「파일 처리」의 이름을 바꿀 때 덮어쓰기 허용을 True로 바꿉니다(값을 두 번 누르면 바뀝니다).'],
+      checks: [siteExists('DATA-FTP', 'ftp'), sitePath('DATA-FTP', 'C:\\ftp\\data'), siteIp('DATA-FTP', '*'), sitePort('DATA-FTP', 2100), ftpSsl('DATA-FTP', 'none'), ftpAuth('DATA-FTP', 'basic', true),
+        ftpRule('DATA-FTP', 'roles', 'Users', true, true), siteAdv('DATA-FTP', 'maxConn', 20), siteAdv('DATA-FTP', 'allowReplace', 'True')],
+      solve: function (st) {
+        var r = M.addFtpSite(st, { name: 'DATA-FTP', path: 'C:\\ftp\\data', ip: '*', port: 2100, ssl: 'none', basic: true, who: 'roles', whoValue: 'Users', read: true, write: true });
+        M.setAdv(st, r.id, 'maxConn', '20'); return M.setAdv(st, r.id, 'allowReplace', 'True');
+      },
+    },
+    {
+      id: 'ftp-3', type: 'ftp', title: 'FTP 디렉터리 검색 · 방화벽 지원(저장 확인)',
+      q: '이미 있는 FTP 사이트 PUB-FTP의 디렉터리 목록 스타일을 UNIX로 바꾸고 4자리 연도를 표시하십시오. 방화벽의 외부 IP 주소는 203.0.113.50입니다.',
+      given: [['대상 사이트', 'PUB-FTP (이미 있음)'], ['디렉터리 목록 스타일', 'UNIX'], ['디렉터리 목록 옵션', '4자리 연도'], ['방화벽의 외부 IP 주소', '203.0.113.50']],
+      setup: function (st) { M.addFtpSite(st, { name: 'PUB-FTP', path: 'C:\\ftp\\pub', ip: '*', port: 21, ssl: 'none', anon: true, who: 'all', read: true }); },
+      steps: [OPEN_IIS + ' PUB-FTP를 선택하고 「FTP 디렉터리 검색」을 두 번 누릅니다.',
+        'UNIX와 4자리 연도를 고른 뒤 왼쪽 트리의 PUB-FTP를 누릅니다. 「변경 내용을 저장하시겠습니까?」에서 「예」를 눌러야 저장됩니다.',
+        '「FTP 방화벽 지원」도 같은 방법으로 외부 IP 주소를 입력하고 사이트를 눌러 「예」로 저장합니다. 창을 그냥 닫으면 저장되지 않습니다.'],
+      checks: [ftpDir('PUB-FTP', 'UNIX'), ftpDirOpt('PUB-FTP', 'year4', true), ftpFw('PUB-FTP', '203.0.113.50')],
+      solve: function (st) { var id = M.findSite(st, 'PUB-FTP').id; M.ftpSetDirBrowse(st, id, { style: 'UNIX', year4: true }); return M.ftpSetFirewall(st, id, { extIp: '203.0.113.50' }); },
+    },
+    {
+      id: 'ftp-4', type: 'ftp', title: 'FTP 메시지와 시간 제한',
+      q: 'FTP 사이트 ARCHIVE-FTP의 배너 메시지와 최대 연결 수 메시지를 지정하고, 고급 설정의 컨트롤 채널 시간 제한과 업로드하는 동안 파일 읽기 허용을 바꾸십시오.',
+      given: [['대상 사이트', 'ARCHIVE-FTP (이미 있음)'], ['배너', 'ARCHIVE FTP 서버'], ['최대 연결 수 메시지', '최대 연결 수에 도달했습니다.'], ['컨트롤 채널 시간 제한', '300'], ['업로드하는 동안 파일 읽기 허용', 'True']],
+      setup: function (st) { M.addFtpSite(st, { name: 'ARCHIVE-FTP', path: 'C:\\ftp\\archive', ip: '*', port: 2200, ssl: 'none', basic: true, who: 'all', read: true }); },
+      steps: [OPEN_IIS + ' ARCHIVE-FTP를 선택하고 「FTP 메시지」를 엽니다.', '배너와 최대 연결 수 칸에 메시지를 입력하고 오른쪽 「적용」을 누르거나, 트리의 사이트를 눌러 「예」로 저장합니다.',
+        '사이트를 마우스 오른쪽 단추로 누르고 「FTP 사이트 관리」 ▶ 「고급 설정」에서 두 값을 바꿉니다.'],
+      checks: [ftpMsg('ARCHIVE-FTP', 'banner', 'ARCHIVE FTP 서버'), ftpMsg('ARCHIVE-FTP', 'maxConn', '최대 연결 수에 도달했습니다.'), siteAdv('ARCHIVE-FTP', 'ctrlTimeout', 300), siteAdv('ARCHIVE-FTP', 'allowRead', 'True')],
+      solve: function (st) {
+        var id = M.findSite(st, 'ARCHIVE-FTP').id, m = M.clone(M.siteById(st, id).msg);
+        m.banner = 'ARCHIVE FTP 서버'; m.maxConn = '최대 연결 수에 도달했습니다.'; M.ftpSetMsg(st, id, m);
+        M.setAdv(st, id, 'ctrlTimeout', '300'); return M.setAdv(st, id, 'allowRead', 'True');
+      },
+    },
+
+    /* ===================== 7. 로컬 사용자 및 그룹 ===================== */
+    {
+      id: 'user-1', type: 'user', title: '새 사용자와 암호 옵션',
+      q: '다음 로컬 사용자를 만드십시오. 사용자가 암호를 바꿀 수 없고 암호가 만료되지 않게 합니다.',
+      given: [['사용자 이름', 'student01'], ['전체 이름', '김하늘'], ['설명', '실습 계정'], ['암호', 'Lab#2026a'], ['다음 로그온할 때 암호 변경', '해제'], ['사용자가 암호를 변경할 수 없음', '선택'], ['암호 사용 기간 제한 없음', '선택']],
+      steps: [OPEN_USERS, '「사용자」를 마우스 오른쪽 단추로 누르고 「새 사용자」를 고릅니다. 이름·암호는 대소문자를 구분합니다.',
+        '「다음 로그온할 때 사용자가 반드시 암호를 변경해야 함」이 선택되어 있으면 아래 두 항목을 고를 수 없습니다. 먼저 해제합니다.',
+        '「만들기」를 누르면 창이 비워진 채 열려 있습니다. 「닫기」로 닫고 목록에서 확인합니다.'],
+      checks: [userExists('student01'), userField('student01', 'full', '김하늘'), userField('student01', 'desc', '실습 계정'), userField('student01', 'pw', 'Lab#2026a'),
+        userFlag('student01', 'mustChange', false), userFlag('student01', 'cantChange', true), userFlag('student01', 'neverExpire', true)],
+      solve: function (st) { return M.createUser(st, { name: 'student01', full: '김하늘', desc: '실습 계정', pw: 'Lab#2026a', mustChange: false, cantChange: true, neverExpire: true }); },
+    },
+    {
+      id: 'user-2', type: 'user', title: '설명으로 제시한 그룹에 추가',
+      q: '사용자 printadm(암호 Prt!2026b)을 만들고, 도메인 프린터를 관리할 수 있는 그룹의 구성원이 되게 하십시오. 다음 로그온할 때 암호를 바꾸지 않아도 됩니다.',
+      given: [['사용자 이름', 'printadm'], ['암호', 'Prt!2026b'], ['다음 로그온할 때 암호 변경', '해제'], ['소속 그룹', '도메인 프린터를 관리할 수 있는 그룹']],
+      steps: [OPEN_USERS, '새 사용자를 만든 뒤 사용자를 두 번 눌러 「소속 그룹」 탭을 엽니다.',
+        '「추가」 > 「고급」 > 「지금 찾기」에서 목록으로 그룹을 고르면 철자를 틀리지 않습니다. 도메인 프린터 관리 그룹은 Print Operators입니다.',
+        '「확인」을 눌러 그룹 선택 창을 닫고, 속성 창도 「확인」으로 닫습니다.'],
+      checks: [userExists('printadm'), userField('printadm', 'pw', 'Prt!2026b'), userFlag('printadm', 'mustChange', false), userGroup('printadm', 'Print Operators')],
+      solve: function (st) { M.createUser(st, { name: 'printadm', pw: 'Prt!2026b', mustChange: false }); return M.addUserToGroups(st, 'printadm', ['Print Operators']); },
+    },
+    {
+      id: 'user-3', type: 'user', title: '세션 시간 제한과 원격 제어',
+      q: '사용자 operator1의 연결 끊긴 세션은 5분 뒤에 끝내고 유휴 세션 제한은 30분으로 하십시오. 원격 제어는 사용하지 않습니다.',
+      given: [['대상 사용자', 'operator1 (이미 있음)'], ['연결 끊긴 세션 끝내기', '5분'], ['유휴 세션 제한', '30분'], ['원격 제어', '사용 안 함(원격 제어 가능 해제)']],
+      setup: function (st) { M.createUser(st, { name: 'operator1', pw: 'Op#2026c', mustChange: false }); },
+      steps: [OPEN_USERS + ' 「사용자」에서 operator1을 두 번 누릅니다.', '「세션」 탭에서 두 목록을 고릅니다.',
+        '「원격 제어」 탭의 「원격 제어 가능」은 기본으로 선택되어 있습니다. 해제한 뒤 「확인」을 누릅니다.'],
+      checks: [userSession('operator1', 'disc', '5분'), userSession('operator1', 'idle', '30분'), userSession('operator1', 'active', '안 함'), userRemote('operator1', false)],
+      solve: function (st) { var u = M.findUser(st, 'operator1'); var s = M.clone(u.session); s.disc = '5분'; s.idle = '30분'; M.setUserSession(st, 'operator1', s); return M.setUserRemote(st, 'operator1', { enabled: false, permission: true, level: 'interact' }); },
+    },
+    {
+      id: 'user-4', type: 'user', title: '계정 사용 · 전화 접속 · 그룹',
+      q: '사용 안 함 상태인 사용자 netadm을 사용하도록 바꾸고, 전화 접속 로그인의 네트워크 액세스를 허용하십시오. Administrators를 제외하고 관리자 권한을 가진 그룹에 넣습니다.',
+      given: [['대상 사용자', 'netadm (이미 있음, 사용 안 함)'], ['계정 사용 안 함', '해제'], ['네트워크 액세스 권한', '액세스 허용'], ['소속 그룹', 'Administrators를 제외하고 관리자 권한을 가진 그룹']],
+      setup: function (st) { M.createUser(st, { name: 'netadm', pw: 'Net#2026d', mustChange: false, disabled: true }); },
+      steps: [OPEN_USERS + ' netadm을 두 번 누릅니다.', '「일반」 탭에서 「계정 사용 안 함」을 해제합니다.', '「전화 접속 로그인」 탭에서 「액세스 허용」을 고릅니다.',
+        '「소속 그룹」 탭에서 Power Users를 추가하고 「확인」을 누릅니다.'],
+      checks: [userFlag('netadm', 'disabled', false), userDial('netadm', 'allow'), userGroup('netadm', 'Power Users')],
+      solve: function (st) { var u = M.findUser(st, 'netadm'); M.setUserGeneral(st, 'netadm', { full: u.full, desc: u.desc, mustChange: false, cantChange: false, neverExpire: false, disabled: false }); M.setUserDial(st, 'netadm', { access: 'allow' }); return M.addUserToGroups(st, 'netadm', ['Power Users']); },
+    },
+    {
+      id: 'user-5', type: 'user', title: '새 그룹과 구성원',
+      q: '로컬 그룹 LabStaff를 만들고 설명을 「실습실 관리 담당」으로 하십시오. 구성원은 student01, student02입니다.',
+      given: [['그룹 이름', 'LabStaff'], ['설명', '실습실 관리 담당'], ['구성원', 'student01, student02 (사용자는 이미 있음)']],
+      setup: function (st) { M.createUser(st, { name: 'student01', pw: 'Lab#2026a', mustChange: false }); M.createUser(st, { name: 'student02', pw: 'Lab#2026e', mustChange: false }); },
+      steps: [OPEN_USERS + ' 「그룹」을 마우스 오른쪽 단추로 누르고 「새 그룹」을 고릅니다.', '그룹 이름과 설명을 넣고 「추가」로 사용자 두 명을 고릅니다. 이름을 세미콜론(;)으로 이어 입력하고 「이름 확인」을 눌러도 됩니다.',
+        '「만들기」를 누른 뒤 「닫기」로 닫습니다.'],
+      checks: [groupExists('LabStaff'), groupDesc('LabStaff', '실습실 관리 담당'), groupMember('LabStaff', 'student01'), groupMember('LabStaff', 'student02')],
+      solve: function (st) { return M.createGroup(st, { name: 'LabStaff', desc: '실습실 관리 담당', members: ['student01', 'student02'] }); },
+    },
+
+    /* ===================== 8. 서비스 ===================== */
+    {
+      id: 'svc-1', type: 'svc', title: 'IPv6 전환 기술 서비스 끄기',
+      q: '6to4, ISATAP, Port Proxy, Teredo 같은 IPv6 전환 기술과 IP-HTTPS로 터널 연결을 제공하는 서비스를 재부팅 후에도 사용하지 않도록 설정하십시오.',
+      given: [['서비스 설명', 'IPv6 전환 기술(6to4, ISATAP, Port Proxy, Teredo)과 IP-HTTPS로 터널 연결 제공'], ['시작 유형', '사용 안 함'], ['서비스 상태', '중지']],
+      steps: [OPEN_SVC, '목록의 「설명」 열이나 왼쪽 설명 칸에서 문제의 핵심어(6to4, Teredo)를 찾습니다. 이 서비스는 IP Helper입니다.',
+        '두 번 눌러 속성을 열고 「중지」를 누른 뒤 시작 유형을 「사용 안 함」으로 바꾸고 「확인」을 누릅니다.'],
+      checks: [svcStart('iphlpsvc', '사용 안 함'), svcStatus('iphlpsvc', '중지됨')],
+      solve: function (st) { M.svcStop(st, 'iphlpsvc'); return M.svcSetStart(st, 'iphlpsvc', '사용 안 함'); },
+    },
+    {
+      id: 'svc-2', type: 'svc', title: '가상 컴퓨터 상태 모니터링 서비스 켜기',
+      q: '정기적으로 하트비트를 보고해 가상 컴퓨터의 상태를 모니터링하는 서비스를 재부팅 후에도 계속 실행되도록 설정하십시오.',
+      given: [['서비스 설명', '하트비트를 보고해 가상 컴퓨터 상태를 모니터링'], ['시작 유형', '자동'], ['서비스 상태', '시작']],
+      steps: [OPEN_SVC, 'Hyper-V로 시작하는 서비스가 여러 개입니다. 설명이 문제와 같은지 확인합니다.', '속성에서 시작 유형을 「자동」으로 바꾸고 「시작」을 누른 뒤 「확인」을 누릅니다.'],
+      checks: [svcStart('vmicheartbeat', '자동'), svcStatus('vmicheartbeat', '시작됨')],
+      solve: function (st) { M.svcSetStart(st, 'vmicheartbeat', '자동'); return M.svcStart(st, 'vmicheartbeat'); },
+    },
+    {
+      id: 'svc-3', type: 'svc', title: 'WNS 연결 서비스 끄기',
+      q: '세션 0에서 실행되며 알림 플랫폼과 연결 공급자를 호스팅해 디바이스와 WNS 서버 사이의 연결을 처리하는 서비스를 재부팅 후에도 사용하지 않도록 설정하십시오.',
+      given: [['서비스 설명', '세션 0에서 실행, 디바이스와 WNS 서버 사이의 연결 처리'], ['시작 유형', '사용 안 함'], ['서비스 상태', '중지']],
+      steps: [OPEN_SVC, '「Windows 푸시 알림」으로 시작하는 서비스가 두 개입니다. 「세션 0」 「WNS 서버」가 있는 설명을 고릅니다.', '중지한 뒤 시작 유형을 「사용 안 함」으로 바꿉니다.'],
+      checks: [svcStart('WpnService', '사용 안 함'), svcStatus('WpnService', '중지됨'), svcStatus('WpnUserService', '시작됨')],
+      solve: function (st) { M.svcStop(st, 'WpnService'); return M.svcSetStart(st, 'WpnService', '사용 안 함'); },
+    },
+    {
+      id: 'svc-4', type: 'svc', title: '성능 로그 서비스 켜기',
+      q: '미리 정한 일정에 따라 성능 데이터를 수집해 로그에 기록하거나 경고를 발생시키는 서비스를 재부팅 후에도 계속 실행되도록 설정하십시오.',
+      given: [['서비스 설명', '성능 데이터를 수집해 로그 기록·경고 발생'], ['시작 유형', '자동'], ['서비스 상태', '시작']],
+      steps: [OPEN_SVC, '설명의 핵심어는 「성능 데이터」 「경고」입니다. 이 서비스는 Performance Logs & Alerts입니다.', '시작 유형을 「자동」으로 바꾸고 「시작」을 누른 뒤 「확인」을 누릅니다.'],
+      checks: [svcStart('pla', '자동'), svcStatus('pla', '시작됨')],
+      solve: function (st) { M.svcSetStart(st, 'pla', '자동'); return M.svcStart(st, 'pla'); },
+    },
+    {
+      id: 'svc-5', type: 'svc', title: '사용 안 함 서비스를 자동으로 시작',
+      q: '근거리 및 광역 네트워크 환경의 기업에 라우팅 서비스를 제공하는 서비스를 재부팅 후에도 계속 실행되도록 설정하십시오. 이 서비스는 현재 사용 안 함 상태입니다.',
+      given: [['서비스 설명', '근거리 및 광역 네트워크 환경의 기업에 라우팅 서비스 제공'], ['시작 유형', '자동'], ['서비스 상태', '시작']],
+      steps: [OPEN_SVC, '이 서비스는 Routing and Remote Access입니다. 시작 유형이 「사용 안 함」이면 「시작」 단추를 눌러도 시작되지 않습니다.',
+        '시작 유형을 「자동」으로 바꾸고 「적용」을 누른 뒤 「시작」을 누르고 「확인」을 누릅니다.'],
+      checks: [svcStart('RemoteAccess', '자동'), svcStatus('RemoteAccess', '시작됨')],
+      solve: function (st) { M.svcSetStart(st, 'RemoteAccess', '자동'); return M.svcStart(st, 'RemoteAccess'); },
     },
   ];
 

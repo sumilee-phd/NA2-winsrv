@@ -169,9 +169,74 @@ eq([M.secs(z.soa.refresh), M.secs(z.soa.retry), M.secs(z.soa.expire), M.secs(z.s
 ok(M.setSoa(st, 0, Object.assign(M.clone(z.soa), { ttl: { d: 0, h: 24, m: 0, s: 0 } })).ok === false, 'TTL 시 칸 24 거부');
 ok(M.setSoa(st, 0, Object.assign(M.clone(z.soa), { resp: 'admin@lab.test' })).ok === false, '책임자에 @ 거부');
 
+console.log('3-2. 웹 · FTP · 사용자 · 서비스 · 보안 옵션');
+st = M.create();
+const BS = String.fromCharCode(92);
+ok(st.iis.sites.length === 1 && st.iis.sites[0].name === 'Default Web Site' && st.iis.sites[0].started, '기본 웹 사이트 있음');
+eq(st.iis.sites[0].docs, ['Default.htm', 'Default.asp', 'index.htm', 'index.html', 'iisstart.htm'], '기본 문서 기본값');
+let wr = M.addWebSite(st, { name: 'A', path: 'C:' + BS + 'a', ip: '*', port: 80, host: '' });
+ok(wr.conflict === 'Default Web Site', '같은 바인딩(*:80:)은 충돌 확인');
+wr = M.addWebSite(st, { name: 'A', path: 'C:' + BS + 'a', ip: '*', port: 80, host: '' }, true);
+ok(wr.ok && wr.stopped, '계속하면 중지 상태로 만듦');
+ok(!M.siteStart(st, wr.id).ok, '충돌하는 사이트는 시작 안 됨');
+ok(/경로/.test(M.addWebSite(st, { name: 'B', path: 'C:₩b', ip: '*', port: 81 }).error), '₩ 기호(U+20A9) 경로 거부');
+ok(/이름이 같은/.test(M.addWebSite(st, { name: 'a', path: 'C:' + BS + 'b', ip: '*', port: 82 }).error), '사이트 이름 중복(대소문자 무시) 거부');
+ok(/포트/.test(M.checkBinding({ ip: '*', port: 70000 })), '포트 범위 밖 거부');
+ok(/True 또는 False/.test(M.setAdv(st, 1, 'autoStart', 'yes').error), '고급 설정 True/False 검사');
+const fp = { name: 'F', path: 'C:' + BS + 'f', ip: '*', port: 21, ssl: 'require' };
+ok(/SSL/.test(M.checkFtpPage(st, fp, 'bind')), 'FTP SSL 기본값(필요)은 인증서 없이는 다음으로 못 감');
+ok(/사용 권한/.test(M.checkFtpPage(st, { who: 'all' }, 'auth')), '권한 부여 대상만 고르고 권한 없으면 오류');
+let fr = M.addFtpSite(st, Object.assign({}, fp, { ssl: 'none', anon: true, who: 'all', read: true }));
+const fs1 = M.siteById(st, fr.id);
+eq([fs1.adv.ctrlTimeout, fs1.adv.dataTimeout, fs1.adv.maxConn, fs1.adv.unauthTimeout, fs1.adv.allowReplace, fs1.dirBrowse.style], [120, 30, M.UINT_MAX, 30, false, 'MS-DOS'], 'FTP 고급 설정 기본값(WS2022 06g)');
+ok(!M.ftpSetFirewall(st, fr.id, { extIp: '10.0.0.300' }).ok, '방화벽 외부 IP 검사');
+// 사용자
+ok(/함께 선택할 수 없습니다/.test(M.createUser(st, { name: 'u1', pw: 'x', mustChange: true, cantChange: true }).error), '다음 로그온 변경과 변경 불가 동시 선택 거부');
+ok(/서로 다릅니다/.test(M.createUser(st, { name: 'u1', pw: 'a', pw2: 'b', mustChange: false }).error), '암호 확인 불일치 거부');
+M.secSet(st, 'minLen', 8);
+ok(/암호 정책/.test(M.createUser(st, { name: 'u1', pw: 'short', mustChange: false }).error), '최소 암호 길이 정책 적용');
+ok(M.createUser(st, { name: 'u1', pw: 'longenough', mustChange: false }).ok && M.groupsOf(st, 'u1').includes('Users'), '새 사용자는 Users 그룹에 들어감');
+ok(/이미/.test(M.createUser(st, { name: 'U1', pw: 'longenough', mustChange: false }).error), '사용자 이름 중복(대소문자 무시) 거부');
+ok(!M.resolveNames(st, 'Print Operator', 'group').ok && M.resolveNames(st, 'print operators', 'group').names[0] === 'Print Operators', '이름 확인: 정확한 그룹 이름으로 바꿈');
+ok(!M.deleteUser(st, 'Administrator').ok, '기본 제공 계정 삭제 거부');
+// 보안 옵션 연동
+M.secoptSet(st, 'adminName', 'root2');
+ok(!!M.findUser(st, 'root2') && M.groupsOf(st, 'root2').includes('Administrators'), 'Administrator 이름 바꾸기가 사용자 목록에 반영');
+M.secoptSet(st, 'guestOn', true);
+ok(M.findUser(st, 'Guest').disabled === false, 'Guest 계정 상태가 사용자 목록에 반영');
+// 서비스
+eq([M.svcGet(st, 'iphlpsvc').start, M.svcGet(st, 'iphlpsvc').status], ['자동', '시작됨'], 'IP Helper 기본값(연습 프로그램 목록)');
+ok(M.svcList(st).length >= 50, '서비스 50개 이상');
+M.svcSetStart(st, 'RemoteAccess', '사용 안 함');
+ok(!M.svcStart(st, 'RemoteAccess').ok, '시작 유형이 사용 안 함이면 시작 안 됨');
+ok(!M.svcPause(st, 'iphlpsvc').ok && M.svcPause(st, 'LanmanServer').ok, '일시 중지는 지원하는 서비스만');
+// 앞 버전 상태 올리기
+const old = JSON.parse(JSON.stringify(M.create())); delete old.iis; delete old.users; delete old.svc; delete old.secopt;
+M.upgrade(old);
+ok(old.iis && old.users && old.svc && old.secopt && old.v === 2, '앞 버전 저장 상태에 새 항목 채움');
+
+console.log('3-3. 새 유형 틀린 풀이');
+(function () {
+  let t = T.byId('web-1'), s = T.fresh(t);
+  M.addWebSite(s, { name: 'campus-web', path: 'c:' + BS + 'inetpub' + BS + 'campus', ip: '172.16.10.10', port: 8080, host: 'www.campus.test' });
+  eq(failedLabels(t, s), ['웹 사이트 이름', '사이트 CAMPUS-WEB · 실제 경로'], 'web-1 이름·경로 대소문자 틀림');
+  t = T.byId('ftp-1'); s = T.fresh(t);
+  M.addFtpSite(s, { name: 'CAMPUS-FTP', path: 'C:' + BS + 'inetpub' + BS + 'ftproot' + BS + 'campus', ip: '172.16.10.10', port: 21, ssl: 'none', anon: true, basic: true, who: 'all', read: true, write: true });
+  eq(failedLabels(t, s), ['사이트 CAMPUS-FTP · FTP 권한 부여 규칙'], 'ftp-1 쓰기 권한까지 줌');
+  t = T.byId('user-2'); s = T.fresh(t);
+  M.createUser(s, { name: 'printadm', pw: 'Prt!2026b', mustChange: false }); M.addUserToGroups(s, 'printadm', ['Power Users']);
+  eq(failedLabels(t, s), ['사용자 printadm · 소속 그룹'], 'user-2 그룹을 잘못 고름');
+  t = T.byId('svc-3'); s = T.fresh(t);
+  M.svcStop(s, 'WpnUserService'); M.svcSetStart(s, 'WpnUserService', '사용 안 함');
+  ok(failedLabels(t, s).length === 3, 'svc-3 비슷한 이름의 다른 서비스를 끔');
+  t = T.byId('sec-5'); s = T.fresh(t);
+  M.secoptSet(s, 'msgTitle', '보안 안내'); M.secoptSet(s, 'msgText', '인가된 사용자만 로그온할 수 있습니다');
+  eq(failedLabels(t, s), ['대화형 로그온: 로그온을 시도하는 사용자에 대한 메시지 텍스트'], 'sec-5 마침표 빠뜨림');
+})();
+
 console.log('4. 자료 점검');
-const src = fs.readFileSync(path.join(__dirname, '..', 'js', 'tasks.js'), 'utf8') + fs.readFileSync(path.join(__dirname, '..', 'js', 'model.js'), 'utf8');
-['icqa', 'ICQAServer', '211.111.100', '192.168.100.14'].forEach(w => ok(!src.toLowerCase().includes(w.toLowerCase()), '협회 자료 값 없음: ' + w));
+const src = ['tasks.js', 'model.js', 'catalog.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'js', f), 'utf8')).join('\n');
+['icqa', 'ICQAServer', 'ICQA-TESTPC', '211.111.100', '192.168.100.14', 'ICQA-Web1', '211.111.144.240', '210.110.100.1', '192.168.100.10', '허가되지 않은 사용자', "name: 'network'", '한국정보통신자격협회'].forEach(w => ok(!src.toLowerCase().includes(w.toLowerCase()), '협회 자료 값 없음: ' + w));
 
 console.log('\n통과 ' + pass + ' · 실패 ' + fail);
 process.exit(fail ? 1 : 0);
