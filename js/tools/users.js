@@ -28,7 +28,7 @@
         host.appendChild(listView([{ label: '이름(RDN)', w: '60%' }, { label: '폴더 내' }], rows, null, { select: n => { sel = new Set([n]); }, dbl: n => { sel = new Set([n]); d2.buttons['확인'].click(); } }, '「지금 찾기」를 누르면 결과가 나옵니다.'));
       };
       draw([]);
-      const d2 = dialog({ title: label + ' 선택', width: 40, body: h('div', {},
+      const d2 = dialog({ title: label + ' 선택', width: 40, body: h('div', { class: 'objsel' },
         h('label', { class: 'flab' }, '개체 유형을 선택하십시오.'), h('div', { class: 'fin' }, textIn({ value: label, label: '개체 유형', width: 16, readonly: true }), h('button', { type: 'button', class: 'btn', disabled: true, title: WS.ui.OUT_TIP }, '개체 유형')),
         h('label', { class: 'flab' }, '찾을 위치를 선택하십시오.'), h('div', { class: 'fin' }, textIn({ value: ctx.st().server, label: '위치', width: 16, readonly: true }), h('button', { type: 'button', class: 'btn', disabled: true, title: WS.ui.OUT_TIP }, '위치')),
         h('div', { class: 'brow spread' }, h('span', { class: 'note' }, '일반 쿼리는 이 연습에서 다루지 않습니다.'),
@@ -36,7 +36,7 @@
         h('label', { class: 'flab' }, '검색 결과:'), host),
         buttons: [{ label: '확인', primary: true, onClick: () => { if (!sel.size) return; ta.value = [...sel].join('; '); } }, { label: '취소', cancel: true }] });
     }
-    dialog({ title: label + ' 선택', width: 38, body: h('div', {},
+    dialog({ title: label + ' 선택', width: 38, body: h('div', { class: 'objsel' },
       h('label', { class: 'flab' }, '개체 유형을 선택하십시오.'), h('div', { class: 'fin' }, textIn({ value: label, label: '개체 유형', width: 16, readonly: true }), h('button', { type: 'button', class: 'btn', disabled: true, title: WS.ui.OUT_TIP }, '개체 유형')),
       h('label', { class: 'flab' }, '찾을 위치를 선택하십시오.'), h('div', { class: 'fin' }, textIn({ value: ctx.st().server, label: '위치', width: 16, readonly: true }), h('button', { type: 'button', class: 'btn', disabled: true, title: WS.ui.OUT_TIP }, '위치')),
       h('label', { class: 'flab' }, '선택할 개체 이름을 입력하십시오(예):'),

@@ -417,6 +417,8 @@ h1 .hl { display: inline-block; background: #FFFFFF; color: var(--title); paddin
 /* ---------- 컴퓨터 관리 ---------- */
 .newuser hr, .dpane hr { border: 0; border-top: 1px solid var(--line); margin: .5em 0; }
 .newuser .flab { min-width: 8em; }
+/* 사용자·그룹 선택: 표제는 한 줄을 차지하고 입력 칸은 그 아래 줄에 둔다(앞 줄 단추 뒤로 흘러 나오지 않게) */
+.objsel .flab { display: block; }
 .lv td .mtag { margin-left: .5em; }
 
 /* ---------- 서비스 ---------- */
