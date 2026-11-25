@@ -141,9 +141,9 @@
   function sitePort(name, port) { return siteC(name, '바인딩 포트', String(port), function (s) { return String(s.bindings[0].port); }); }
   function siteHost(name, host) { return siteC(name, '바인딩 호스트 이름', host || NONE, function (s) { return s.bindings[0].host || NONE; }); }
   function siteStarted(name) { return siteC(name, '상태', '시작됨', function (s) { return s.started ? '시작됨' : '중지됨'; }); }
-  function siteAdv(name, key, value) {
+  function siteAdv(name, key, value, kind) {   // kind: 'web'·'ftp'. 두 종류에 같은 키(maxConn)가 있으면 이름표가 다르다
     var def = null;
-    ['web', 'ftp'].forEach(function (k) { M.ADV[k].forEach(function (d) { if (d.key === key && !def) def = d; }); });
+    (kind ? [kind] : ['web', 'ftp']).forEach(function (k) { M.ADV[k].forEach(function (d) { if (d.key === key && !def) def = d; }); });
     return siteC(name, '고급 설정 ' + def.label, String(value), function (s) { return M.advValue(s, key); });
   }
   function siteDocs(name, docs) { return siteC(name, '기본 문서', docs.join(', '), function (s) { return s.docs.join(', ') || NONE; }); }
@@ -626,7 +626,7 @@
         '만든 사이트를 마우스 오른쪽 단추로 누르고 「FTP 사이트 관리」 ▶ 「고급 설정」을 엽니다.',
         '「연결」의 최대 연결 수를 20으로, 「파일 처리」의 이름을 바꿀 때 덮어쓰기 허용을 True로 바꿉니다(값을 두 번 누르면 바뀝니다).'],
       checks: [siteExists('DATA-FTP', 'ftp'), sitePath('DATA-FTP', 'C:\\ftp\\data'), siteIp('DATA-FTP', '*'), sitePort('DATA-FTP', 2100), ftpSsl('DATA-FTP', 'none'), ftpAuth('DATA-FTP', 'basic', true),
-        ftpRule('DATA-FTP', 'roles', 'Users', true, true), siteAdv('DATA-FTP', 'maxConn', 20), siteAdv('DATA-FTP', 'allowReplace', 'True')],
+        ftpRule('DATA-FTP', 'roles', 'Users', true, true), siteAdv('DATA-FTP', 'maxConn', 20, 'ftp'), siteAdv('DATA-FTP', 'allowReplace', 'True', 'ftp')],
       solve: function (st) {
         var r = M.addFtpSite(st, { name: 'DATA-FTP', path: 'C:\\ftp\\data', ip: '*', port: 2100, ssl: 'none', basic: true, who: 'roles', whoValue: 'Users', read: true, write: true });
         M.setAdv(st, r.id, 'maxConn', '20'); return M.setAdv(st, r.id, 'allowReplace', 'True');
@@ -650,7 +650,7 @@
       setup: function (st) { M.addFtpSite(st, { name: 'ARCHIVE-FTP', path: 'C:\\ftp\\archive', ip: '*', port: 2200, ssl: 'none', basic: true, who: 'all', read: true }); },
       steps: [OPEN_IIS + ' ARCHIVE-FTP를 선택하고 「FTP 메시지」를 엽니다.', '배너와 최대 연결 수 칸에 메시지를 입력하고 오른쪽 「적용」을 누르거나, 트리의 사이트를 눌러 「예」로 저장합니다.',
         '사이트를 마우스 오른쪽 단추로 누르고 「FTP 사이트 관리」 ▶ 「고급 설정」에서 두 값을 바꿉니다.'],
-      checks: [ftpMsg('ARCHIVE-FTP', 'banner', 'ARCHIVE FTP 서버'), ftpMsg('ARCHIVE-FTP', 'maxConn', '최대 연결 수에 도달했습니다.'), siteAdv('ARCHIVE-FTP', 'ctrlTimeout', 300), siteAdv('ARCHIVE-FTP', 'allowRead', 'True')],
+      checks: [ftpMsg('ARCHIVE-FTP', 'banner', 'ARCHIVE FTP 서버'), ftpMsg('ARCHIVE-FTP', 'maxConn', '최대 연결 수에 도달했습니다.'), siteAdv('ARCHIVE-FTP', 'ctrlTimeout', 300, 'ftp'), siteAdv('ARCHIVE-FTP', 'allowRead', 'True', 'ftp')],
       solve: function (st) {
         var id = M.findSite(st, 'ARCHIVE-FTP').id, m = M.clone(M.siteById(st, id).msg);
         m.banner = 'ARCHIVE FTP 서버'; m.maxConn = '최대 연결 수에 도달했습니다.'; M.ftpSetMsg(st, id, m);
